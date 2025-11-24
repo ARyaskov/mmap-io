@@ -3,12 +3,12 @@ type MapProtectionFlags = MmapIo["PROT_NONE"] | MmapIo["PROT_READ"] | MmapIo["PR
 type MapFlags = MmapIo["MAP_PRIVATE"] | MmapIo["MAP_SHARED"] | MmapIo["MAP_NONBLOCK"] | MmapIo["MAP_POPULATE"] | number;
 type MapAdvise = MmapIo["MADV_NORMAL"] | MmapIo["MADV_RANDOM"] | MmapIo["MADV_SEQUENTIAL"] | MmapIo["MADV_WILLNEED"] | MmapIo["MADV_DONTNEED"];
 type MmapIo = {
-    map(size: number, protection: MapProtectionFlags, flags: MapFlags, fd: FileDescriptor, offset?: number, advise?: MapAdvise, name?: Buffer): SharedArrayBuffer;
-    advise(buffer: Buffer, offset: number, length: number, advise: MapAdvise): void;
-    advise(buffer: Buffer, advise: MapAdvise): void;
-    incore(buffer: Buffer): [number, number];
-    sync(buffer: Buffer, offset?: number, size?: number, blocking_sync?: boolean, invalidate_pages?: boolean): void;
-    sync(buffer: Buffer, blocking_sync: boolean, invalidate_pages?: boolean): void;
+    map(size: number, protection: MapProtectionFlags, flags: MapFlags, fd: FileDescriptor, offset?: number, advise?: MapAdvise, name?: Buffer): Uint8Array;
+    advise(buffer: Buffer | SharedArrayBuffer | Uint8Array, offset: number, length: number, advise: MapAdvise): void;
+    advise(buffer: Buffer | SharedArrayBuffer | Uint8Array, advise: MapAdvise): void;
+    incore(buffer: Buffer | SharedArrayBuffer | Uint8Array): [number, number];
+    sync(buffer: Buffer | SharedArrayBuffer | Uint8Array, offset?: number, size?: number, blocking_sync?: boolean, invalidate_pages?: boolean): void;
+    sync(buffer: Buffer | SharedArrayBuffer | Uint8Array, blocking_sync: boolean, invalidate_pages?: boolean): void;
     readonly PROT_READ: 1;
     readonly PROT_WRITE: 2;
     readonly PROT_EXEC: 4;

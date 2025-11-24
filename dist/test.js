@@ -28,8 +28,8 @@ fd = fs.openSync(process.argv[1], 'r');
 size = fs.fstatSync(fd).size;
 say("file size", size);
 buffer = mmap.map(size, PROT_READ, MAP_SHARED, fd, 0, mmap.MADV_SEQUENTIAL);
-say("buflen 1 = ", buffer.length);
-assert.equal(buffer.length, size);
+say("buflen 1 = ", buffer.byteLength);
+assert.equal(buffer.byteLength, size);
 say("Give advise with 2 args");
 mmap.advise(buffer, mmap.MADV_NORMAL);
 say("Give advise with 4 args");
@@ -58,16 +58,16 @@ try {
   say("deliberate out of bounds, caught exception - does this thing happen?", e.code, 'err-obj = ', e);
 }
 buffer = mmap.map(size, PROT_READ, MAP_SHARED, fd, 0);
-say("buflen test 5-arg map call = ", buffer.length);
-assert.equal(buffer.length, size);
+say("buflen test 5-arg map call = ", buffer.byteLength);
+assert.equal(buffer.byteLength, size);
 buffer = mmap.map(size, PROT_READ, MAP_SHARED, fd);
-say("buflen test 4-arg map call = ", buffer.length);
-assert.equal(buffer.length, size);
+say("buflen test 4-arg map call = ", buffer.byteLength);
+assert.equal(buffer.byteLength, size);
 if (os.type() !== 'Windows_NT') {
   fd = fs.openSync(process.argv[1], 'r');
   buffer = mmap.map(size, PROT_READ, MAP_SHARED, fd, PAGESIZE);
-  say("buflen test 3 = ", buffer.length);
-  assert.equal(buffer.length, size);
+  say("buflen test 3 = ", buffer.byteLength);
+  assert.equal(buffer.byteLength, size);
 }
 fd = fs.openSync(process.argv[1], 'r');
 try {

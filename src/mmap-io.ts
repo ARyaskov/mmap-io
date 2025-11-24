@@ -49,21 +49,21 @@ type MmapIo = {
         offset?: number,
         advise?: MapAdvise,
         name?: Buffer
-    ): SharedArrayBuffer
+    ): Uint8Array
 
     advise(
-        buffer: Buffer,
+        buffer: Buffer | SharedArrayBuffer | Uint8Array,
         offset: number,
         length: number,
         advise: MapAdvise
     ): void
-    advise(buffer: Buffer, advise: MapAdvise): void
+    advise(buffer: Buffer | SharedArrayBuffer | Uint8Array, advise: MapAdvise): void
 
     /// Returns tuple of [ unmapped-pages-count, mapped-pages-count ]
-    incore(buffer: Buffer): [number, number]
+    incore(buffer: Buffer | SharedArrayBuffer | Uint8Array): [number, number]
 
     sync(
-        buffer: Buffer,
+        buffer: Buffer | SharedArrayBuffer | Uint8Array,
         offset?: number,
         size?: number,
         blocking_sync?: boolean,
@@ -71,7 +71,7 @@ type MmapIo = {
     ): void
 
     sync(
-        buffer: Buffer,
+        buffer: Buffer | SharedArrayBuffer | Uint8Array,
         blocking_sync: boolean,
         invalidate_pages?: boolean
     ): void
@@ -102,19 +102,21 @@ delete mmap_lib_raw_.sync_lib_private__
 // Take care of all the param juggling here instead of in C++ code, by making
 // some overloads, and doing some argument defaults /ozra
 mmap_lib_raw_.sync = function(
-    buf: Buffer,
+    buf: Buffer | SharedArrayBuffer | Uint8Array,
     par_a?: any,
     par_b?: any,
     par_c?: any,
     par_d?: any
 ): void {
+    // Get the buffer size - use byteLength for SharedArrayBuffer/Uint8Array, length for Buffer
+    const bufSize = (buf instanceof SharedArrayBuffer || buf instanceof Uint8Array) ? buf.byteLength : (buf as Buffer).length;
     if (typeof par_a === "boolean") {
-        raw_sync_fn_(buf, 0, buf.length, par_a, par_b || false)
+        raw_sync_fn_(buf, 0, bufSize, par_a, par_b || false)
     } else {
         raw_sync_fn_(
             buf,
             par_a || 0,
-            par_b || buf.length,
+            par_b || bufSize,
             par_c || false,
             par_d || false
         )
