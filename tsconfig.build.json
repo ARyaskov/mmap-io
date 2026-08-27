@@ -1,0 +1,6 @@
+{
+  /* Publish build: only the library entry point reaches dist/. The type-level
+     test in src/ is checked by `npm run typecheck`, never shipped. */
+  "extends": "./tsconfig.json",
+  "include": ["src/mmap-io.ts"]
+}

@@ -1,0 +1,47 @@
+name: CI
+
+# Everyday verification for branches and pull requests. `main` is excluded
+# because release.yml already runs the same matrix there, and publishes.
+on:
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+  build:
+    name: Build
+    needs: static
+    # Every Node major the package ships a prebuild for - odd releases
+    # included, since a break there is a break for someone.
+    uses: ./.github/workflows/build.yml
+    with:
+      node-versions: '[18, 19, 20, 21, 22, 23, 24, 25, 26]'

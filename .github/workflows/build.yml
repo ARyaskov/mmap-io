@@ -1,0 +1,106 @@
+name: Build
+
+# Reusable matrix build shared by ci.yml and release.yml, so the two never
+# drift apart. Each job compiles the addon against one Node major on one
+# platform, runs the test suite against the freshly built binary and
+# optionally packages it as a node-pre-gyp tarball.
+on:
+  workflow_call:
+    inputs:
+      node-versions:
+        description: 'JSON array of Node major versions, e.g. "[18, 20, 22]"'
+        required: true
+        type: string
+      upload-prebuilds:
+        description: 'Package the addon and upload it as a workflow artifact'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target.label }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.target.os }}
+    strategy:
+      # A single broken Node/platform combination must not block the rest:
+      # whatever builds successfully still gets released.
+      fail-fast: false
+      matrix:
+        node: ${{ fromJSON(inputs.node-versions) }}
+        target:
+          # ubuntu-22.04 deliberately, not -latest: it links against the
+          # oldest glibc still supported, which widens what the prebuild runs on.
+          - { os: ubuntu-22.04,    label: linux-x64,    arch: x64 }
+          # macos-13 was retired; it silently queued forever instead of
+          # failing, because no runner carries that label any more.
+          - { os: macos-15-intel,  label: darwin-x64,   arch: x64 }
+          - { os: macos-latest,    label: darwin-arm64, arch: arm64 }
+          - { os: windows-2022,    label: win32-x64,    arch: x64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      # Must precede setup-node so that `cache: pnpm` can find the store.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          architecture: ${{ matrix.target.arch }}
+          cache: pnpm
+
+      - name: Setup Python
+        # node-gyp drives gyp through Python; pinning it keeps the build off
+        # whatever interpreter the runner image happens to ship.
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        # --ignore-scripts: the package's own `install` hook would build the
+        # addon implicitly. The steps below do it explicitly instead.
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Use node-gyp 13 on Windows + Node 26
+        # Node 26's Windows build turns on thin LTO, and its common.gypi leaks
+        # /flto=thin and /opt:lldltojobs into every addon build. Those are
+        # lld-link options; MSVC's link.exe rejects the second one outright
+        # with LNK1117. node-gyp 13 forces the LTO variables off for MSVC
+        # (nodejs/node-gyp#3331), but it only runs on Node 22.22+/24.15+/26+,
+        # so it cannot be the version pinned for the rest of the matrix.
+        if: ${{ runner.os == 'Windows' && matrix.node >= 26 }}
+        shell: bash
+        run: |
+          npm install -g node-gyp@^13
+          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >> "$GITHUB_ENV"
+
+      - name: Build TypeScript
+        run: pnpm run build-ts
+
+      - name: Build native addon
+        run: pnpm exec node-pre-gyp rebuild --build-from-source
+
+      - name: Test
+        run: pnpm test
+
+      - name: Package binary
+        if: ${{ inputs.upload-prebuilds }}
+        run: pnpm exec node-pre-gyp package
+
+      - name: List package
+        if: ${{ inputs.upload-prebuilds }}
+        shell: bash
+        run: ls -la build/stage/*/
+
+      - name: Upload binary artifact
+        if: ${{ inputs.upload-prebuilds }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuild-${{ matrix.target.label }}-node${{ matrix.node }}
+          path: build/stage/**/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
