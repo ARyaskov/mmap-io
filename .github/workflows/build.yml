@@ -33,10 +33,12 @@ jobs:
         target:
           # ubuntu-22.04 deliberately, not -latest: it links against the
           # oldest glibc still supported, which widens what the prebuild runs on.
-          - { os: ubuntu-22.04, label: linux-x64,    arch: x64 }
-          - { os: macos-13,     label: darwin-x64,   arch: x64 }
-          - { os: macos-latest, label: darwin-arm64, arch: arm64 }
-          - { os: windows-2022, label: win32-x64,    arch: x64 }
+          - { os: ubuntu-22.04,    label: linux-x64,    arch: x64 }
+          # macos-13 was retired; it silently queued forever instead of
+          # failing, because no runner carries that label any more.
+          - { os: macos-15-intel,  label: darwin-x64,   arch: x64 }
+          - { os: macos-latest,    label: darwin-arm64, arch: arm64 }
+          - { os: windows-2022,    label: win32-x64,    arch: x64 }
     steps:
       - uses: actions/checkout@v4
 
