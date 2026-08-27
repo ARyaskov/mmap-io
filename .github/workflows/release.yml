@@ -1,0 +1,226 @@
+name: Release
+
+# Triggers:
+#   * push to the `test` branch -> prerelease tagged vX.Y.Z-test.<run_number>
+#   * push of a `v*` tag        -> regular release under that tag
+#   * manual dispatch           -> tag can be supplied explicitly
+#
+# To switch over to main later: replace `test` with `main` under `branches`
+# below. The "Resolve tag" step already produces a clean vX.Y.Z tag for
+# main/master, so nothing else needs to change.
+on:
+  push:
+    branches:
+      - test
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (defaults to a value derived from package.json)'
+        required: false
+        type: string
+      prerelease:
+        description: 'Mark the release as a prerelease'
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Resolve tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            PRERELEASE=false
+          elif [ -n "${INPUT_TAG}" ]; then
+            TAG="${INPUT_TAG}"
+            PRERELEASE="${INPUT_PRERELEASE:-false}"
+          elif [ "${GITHUB_REF_NAME}" = "main" ] || [ "${GITHUB_REF_NAME}" = "master" ]; then
+            TAG="v${VERSION}"
+            PRERELEASE=false
+          else
+            # test branch (or any other): unique prerelease tag on this commit
+            SLUG="$(echo "${GITHUB_REF_NAME}" | tr '/_' '-' | tr -cd '[:alnum:]-')"
+            TAG="v${VERSION}-${SLUG}.${GITHUB_RUN_NUMBER}"
+            PRERELEASE=true
+          fi
+
+          echo "version=${VERSION}"       >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"               >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Release plan"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| package version | \`${VERSION}\` |"
+            echo "| tag | \`${TAG}\` |"
+            echo "| commit | \`${GITHUB_SHA}\` |"
+            echo "| prerelease | \`${PRERELEASE}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: ${{ matrix.target.label }} / node ${{ matrix.node }}
+    needs: prepare
+    runs-on: ${{ matrix.target.os }}
+    strategy:
+      # A single broken Node/platform combination must not block the release:
+      # whatever builds successfully still gets published.
+      fail-fast: false
+      matrix:
+        node: [18, 19, 20, 21, 22, 23, 24, 25, 26]
+        target:
+          - { os: ubuntu-22.04, label: linux-x64,    arch: x64 }
+          - { os: macos-13,     label: darwin-x64,   arch: x64 }
+          - { os: macos-latest, label: darwin-arm64, arch: arm64 }
+          - { os: windows-2022, label: win32-x64,    arch: x64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          architecture: ${{ matrix.target.arch }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        # --ignore-scripts: the install/prepare hooks invoke node-pre-gyp on
+        # their own; the native build runs as explicit steps below instead.
+        run: npm ci --ignore-scripts
+
+      - name: Refresh native build toolchain
+        # nan 2.20 / node-gyp 10 from the lockfile predate Node 23+.
+        # Upgrade inside node_modules only (--no-save); package.json is untouched.
+        run: npm install --no-save --ignore-scripts nan@^2 node-gyp@^11
+
+      - name: Build TypeScript
+        run: npm run build-es
+
+      - name: Build native addon
+        run: npx node-pre-gyp rebuild --build-from-source
+
+      - name: Smoke test
+        run: >-
+          node -e "const m = require('./');
+          if (typeof m.map !== 'function') throw new Error('bad binding');
+          console.log('ok', process.versions.modules, process.platform, process.arch)"
+
+      - name: Package binary
+        run: npx node-pre-gyp package
+
+      - name: List package
+        shell: bash
+        run: ls -la build/stage/*/
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuild-${{ matrix.target.label }}-node${{ matrix.node }}
+          path: build/stage/**/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Create release
+    needs: [prepare, build]
+    # always(): publish whatever the matrix managed to build.
+    if: ${{ always() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: prebuild-*
+          merge-multiple: true
+
+      - name: Collect assets
+        id: assets
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          find artifacts -name '*.tar.gz' -exec mv -f {} assets/ \; 2>/dev/null || true
+          COUNT="$(find assets -name '*.tar.gz' | wc -l | tr -d ' ')"
+          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
+          if [ "${COUNT}" = "0" ]; then
+            echo "::error::No platform produced a binary - skipping the release."
+            exit 1
+          fi
+          ls -la assets/
+
+      - name: Build release notes
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Prebuilt native binaries for \`@riaskov/mmap-io@${VERSION}\`."
+            echo ""
+            echo "Commit: \`${GITHUB_SHA}\`"
+            echo ""
+            echo "| asset | node ABI | platform |"
+            echo "|---|---|---|"
+            for f in assets/*.tar.gz; do
+              n="$(basename "$f")"
+              abi="$(echo "$n" | sed -n 's/.*-\(node-v[0-9]\+\)-.*/\1/p')"
+              plat="$(echo "$n" | sed -n 's/.*-node-v[0-9]\+-\(.*\)\.tar\.gz/\1/p')"
+              echo "| \`${n}\` | ${abi} | ${plat} |"
+            done
+          } > release-notes.md
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists - refreshing its assets."
+            gh release edit "${TAG}" \
+              --notes-file release-notes.md \
+              --prerelease="${PRERELEASE}"
+            gh release upload "${TAG}" assets/*.tar.gz --clobber
+          else
+            # --target creates the tag on exactly this commit
+            gh release create "${TAG}" assets/*.tar.gz \
+              --target "${GITHUB_SHA}" \
+              --title "${TAG}" \
+              --notes-file release-notes.md \
+              --prerelease="${PRERELEASE}"
+          fi
+
+          echo "Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
