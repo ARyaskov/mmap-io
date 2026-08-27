@@ -40,8 +40,8 @@ jobs:
   build:
     name: Build
     needs: static
-    # LTS lines plus the current and previous majors; release.yml covers the
-    # full 18..26 span.
+    # Every Node major the package ships a prebuild for - odd releases
+    # included, since a break there is a break for someone.
     uses: ./.github/workflows/build.yml
     with:
-      node-versions: '[18, 20, 22, 24, 26]'
+      node-versions: '[18, 19, 20, 21, 22, 23, 24, 25, 26]'

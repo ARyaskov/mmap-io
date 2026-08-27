@@ -5,6 +5,14 @@ const mmap_lib_raw_ = require(binding_path);
 
 type FileDescriptor = number
 
+/**
+ * What every entry point taking a mapping will accept.
+ *
+ * `map()` returns a SharedArrayBuffer, but reading and writing bytes means
+ * wrapping it in a view (`Buffer.from(sab)`), so both forms have to work.
+ */
+type MmapBuffer = SharedArrayBuffer | ArrayBuffer | ArrayBufferView
+
 type MapProtectionFlags =
     | MmapIo["PROT_NONE"] // 0
     | MmapIo["PROT_READ"] // 1
@@ -51,19 +59,30 @@ type MmapIo = {
         name?: Buffer
     ): SharedArrayBuffer
 
+    /**
+     * Releases the mapping right away instead of waiting for the garbage
+     * collector to finalize the SharedArrayBuffer.
+     *
+     * Returns true when this call did the unmapping, false when the mapping
+     * was already gone. Touching the buffer afterwards reads or writes address
+     * space that no longer belongs to the process - so only call this once
+     * every view over the mapping is out of use.
+     */
+    unmap(buffer: MmapBuffer): boolean
+
     advise(
-        buffer: Buffer,
+        buffer: MmapBuffer,
         offset: number,
         length: number,
         advise: MapAdvise
     ): void
-    advise(buffer: Buffer, advise: MapAdvise): void
+    advise(buffer: MmapBuffer, advise: MapAdvise): void
 
     /// Returns tuple of [ unmapped-pages-count, mapped-pages-count ]
-    incore(buffer: Buffer): [number, number]
+    incore(buffer: MmapBuffer): [number, number]
 
     sync(
-        buffer: Buffer,
+        buffer: MmapBuffer,
         offset?: number,
         size?: number,
         blocking_sync?: boolean,
@@ -71,7 +90,7 @@ type MmapIo = {
     ): void
 
     sync(
-        buffer: Buffer,
+        buffer: MmapBuffer,
         blocking_sync: boolean,
         invalidate_pages?: boolean
     ): void
@@ -82,8 +101,12 @@ type MmapIo = {
     readonly PROT_NONE: 0
     readonly MAP_SHARED: 1
     readonly MAP_PRIVATE: 2
-    readonly MAP_NONBLOCK: 65536
-    readonly MAP_POPULATE: 32768
+
+    /** Linux-only hint. 0 on platforms whose mmap(2) has no such flag. */
+    readonly MAP_NONBLOCK: number
+    /** Linux-only hint. 0 on platforms whose mmap(2) has no such flag. */
+    readonly MAP_POPULATE: number
+
     readonly MADV_NORMAL: 0
     readonly MADV_RANDOM: 1
     readonly MADV_SEQUENTIAL: 2
@@ -91,6 +114,13 @@ type MmapIo = {
     readonly MADV_DONTNEED: 4
 
     readonly PAGESIZE: number
+
+    /**
+     * Alignment the `offset` argument of `map()` has to respect. Equal to
+     * PAGESIZE on POSIX; 64 KiB on Windows, where MapViewOfFile() works in
+     * allocation granularity rather than pages.
+     */
+    readonly ALLOCATIONGRANULARITY: number
 }
 
 // snatch the raw C++-sync func
@@ -102,19 +132,25 @@ delete mmap_lib_raw_.sync_lib_private__
 // Take care of all the param juggling here instead of in C++ code, by making
 // some overloads, and doing some argument defaults /ozra
 mmap_lib_raw_.sync = function(
-    buf: Buffer,
+    buf: MmapBuffer,
     par_a?: any,
     par_b?: any,
     par_c?: any,
     par_d?: any
 ): void {
+    // Every accepted buffer kind carries byteLength. `length` only exists on
+    // views, so reading it here used to hand C++ an undefined - and therefore
+    // zero - length whenever a bare SharedArrayBuffer was passed, making the
+    // whole call a silent no-op.
+    const byte_length_ = buf.byteLength
+
     if (typeof par_a === "boolean") {
-        raw_sync_fn_(buf, 0, buf.length, par_a, par_b || false)
+        raw_sync_fn_(buf, 0, byte_length_, par_a, par_b || false)
     } else {
         raw_sync_fn_(
             buf,
             par_a || 0,
-            par_b || buf.length,
+            par_b || byte_length_,
             par_c || false,
             par_d || false
         )
