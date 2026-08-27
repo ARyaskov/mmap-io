@@ -6,8 +6,8 @@ name: Release
 #   * manual dispatch           -> tag can be supplied explicitly
 #
 # To switch over to main later: replace `test` with `main` under `branches`
-# below. The "Resolve tag" step already produces a clean vX.Y.Z tag for
-# main/master, so nothing else needs to change.
+# below, and drop `test` from the branches-ignore list in ci.yml. The
+# "Resolve tag" step already produces a clean vX.Y.Z tag for main/master.
 on:
   push:
     branches:
@@ -59,6 +59,8 @@ jobs:
             TAG="${INPUT_TAG}"
             PRERELEASE="${INPUT_PRERELEASE:-false}"
           elif [ "${GITHUB_REF_NAME}" = "main" ] || [ "${GITHUB_REF_NAME}" = "master" ]; then
+            # node-pre-gyp resolves downloads from binary.remote_path, which is
+            # "./v{version}/" - so the tag has to be exactly v<version>.
             TAG="v${VERSION}"
             PRERELEASE=false
           else
@@ -84,70 +86,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   build:
-    name: ${{ matrix.target.label }} / node ${{ matrix.node }}
+    name: Build
     needs: prepare
-    runs-on: ${{ matrix.target.os }}
-    strategy:
-      # A single broken Node/platform combination must not block the release:
-      # whatever builds successfully still gets published.
-      fail-fast: false
-      matrix:
-        node: [18, 19, 20, 21, 22, 23, 24, 25, 26]
-        target:
-          - { os: ubuntu-22.04, label: linux-x64,    arch: x64 }
-          - { os: macos-13,     label: darwin-x64,   arch: x64 }
-          - { os: macos-latest, label: darwin-arm64, arch: arm64 }
-          - { os: windows-2022, label: win32-x64,    arch: x64 }
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js ${{ matrix.node }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-          architecture: ${{ matrix.target.arch }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        # --ignore-scripts: the install/prepare hooks invoke node-pre-gyp on
-        # their own; the native build runs as explicit steps below instead.
-        run: npm ci --ignore-scripts
-
-      - name: Refresh native build toolchain
-        # nan 2.20 / node-gyp 10 from the lockfile predate Node 23+.
-        # Upgrade inside node_modules only (--no-save); package.json is untouched.
-        run: npm install --no-save --ignore-scripts nan@^2 node-gyp@^11
-
-      - name: Build TypeScript
-        run: npm run build-es
-
-      - name: Build native addon
-        run: npx node-pre-gyp rebuild --build-from-source
-
-      - name: Smoke test
-        run: >-
-          node -e "const m = require('./');
-          if (typeof m.map !== 'function') throw new Error('bad binding');
-          console.log('ok', process.versions.modules, process.platform, process.arch)"
-
-      - name: Package binary
-        run: npx node-pre-gyp package
-
-      - name: List package
-        shell: bash
-        run: ls -la build/stage/*/
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: prebuild-${{ matrix.target.label }}-node${{ matrix.node }}
-          path: build/stage/**/*.tar.gz
-          if-no-files-found: error
-          retention-days: 7
+    uses: ./.github/workflows/build.yml
+    with:
+      node-versions: '[18, 19, 20, 21, 22, 23, 24, 25, 26]'
+      upload-prebuilds: true
 
   release:
     name: Create release
