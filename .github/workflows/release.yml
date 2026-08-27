@@ -96,8 +96,10 @@ jobs:
   release:
     name: Create release
     needs: [prepare, build]
-    # always(): publish whatever the matrix managed to build.
-    if: ${{ always() && needs.prepare.result == 'success' }}
+    # Publish whatever the matrix managed to build, so one broken Node major
+    # does not hold up the rest. !cancelled() rather than always(): a run that
+    # somebody stopped by hand should not leave a half-filled release behind.
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

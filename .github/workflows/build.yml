@@ -65,6 +65,19 @@ jobs:
         # addon implicitly. The steps below do it explicitly instead.
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Use node-gyp 13 on Windows + Node 26
+        # Node 26's Windows build turns on thin LTO, and its common.gypi leaks
+        # /flto=thin and /opt:lldltojobs into every addon build. Those are
+        # lld-link options; MSVC's link.exe rejects the second one outright
+        # with LNK1117. node-gyp 13 forces the LTO variables off for MSVC
+        # (nodejs/node-gyp#3331), but it only runs on Node 22.22+/24.15+/26+,
+        # so it cannot be the version pinned for the rest of the matrix.
+        if: ${{ runner.os == 'Windows' && matrix.node >= 26 }}
+        shell: bash
+        run: |
+          npm install -g node-gyp@^13
+          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >> "$GITHUB_ENV"
+
       - name: Build TypeScript
         run: pnpm run build-ts
 
