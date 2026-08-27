@@ -1,17 +1,17 @@
 name: Release
 
 # Triggers:
-#   * push to the `test` branch -> prerelease tagged vX.Y.Z-test.<run_number>
-#   * push of a `v*` tag        -> regular release under that tag
-#   * manual dispatch           -> tag can be supplied explicitly
+#   * push to `main`     -> release tagged vX.Y.Z, taken from package.json
+#   * push of a `v*` tag -> release under that tag
+#   * manual dispatch    -> tag can be supplied explicitly
 #
-# To switch over to main later: replace `test` with `main` under `branches`
-# below, and drop `test` from the branches-ignore list in ci.yml. The
-# "Resolve tag" step already produces a clean vX.Y.Z tag for main/master.
+# Every other branch goes through ci.yml instead, which runs the same matrix
+# without publishing anything. Dispatching this workflow from such a branch
+# still works and produces a prerelease tagged vX.Y.Z-<branch>.<run_number>.
 on:
   push:
     branches:
-      - test
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -64,7 +64,7 @@ jobs:
             TAG="v${VERSION}"
             PRERELEASE=false
           else
-            # test branch (or any other): unique prerelease tag on this commit
+            # any other branch: unique prerelease tag on this commit
             SLUG="$(echo "${GITHUB_REF_NAME}" | tr '/_' '-' | tr -cd '[:alnum:]-')"
             TAG="v${VERSION}-${SLUG}.${GITHUB_RUN_NUMBER}"
             PRERELEASE=true

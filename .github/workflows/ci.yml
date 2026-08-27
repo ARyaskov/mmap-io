@@ -1,11 +1,11 @@
 name: CI
 
-# Everyday verification. The `test` branch is excluded because release.yml
-# already runs the full matrix there.
+# Everyday verification for branches and pull requests. `main` is excluded
+# because release.yml already runs the same matrix there, and publishes.
 on:
   push:
     branches-ignore:
-      - test
+      - main
   pull_request:
 
 concurrency:
