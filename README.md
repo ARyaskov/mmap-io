@@ -1,5 +1,5 @@
 
-# mmap-io - Node.js addon for memory mapping files (2024 version)
+# mmap-io - Node.js addon for memory mapping files (2026 version)
 
 ## Quick info
 
@@ -76,8 +76,6 @@ npm install
 # Some code examples
 
 ```typescript
-// Following code is plastic fruit; not t[ae]sted...
-
 import mmap from 'mmap-io';
 import fs from 'fs';
 
